@@ -30,10 +30,10 @@ jobs:
   linux-windows:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - run: go test ./...
@@ -52,7 +52,7 @@ jobs:
             cp LICENSE README.md "dist/$name/"
             (cd dist && zip -qr "$name.zip" "$name")
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: tools-linux-windows
           path: dist/*.zip
@@ -66,16 +66,16 @@ jobs:
       NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
       NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
       # The signing script comes from the workflow's own commit, so tags made
       # before it existed (e.g. v1.0.0) can still be released by hand.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: ci
           sparse-checkout: .github/scripts
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Build universal binaries
@@ -102,7 +102,7 @@ jobs:
         run: |
           ditto -c -k --keepParent "dist/$NAME" "dist/$NAME.zip"
           ci/.github/scripts/macos-codesign.sh notarize "dist/$NAME.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: tools-macos
           path: dist/*.zip
@@ -112,7 +112,7 @@ jobs:
     if: startsWith(inputs.tag || github.ref_name, 'v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
