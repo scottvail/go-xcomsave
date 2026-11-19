@@ -46,7 +46,11 @@ Notes:
 
 ## Command-line tools
 
-Go equivalents of the original tools:
+Go equivalents of the original tools. Download them from the
+[Releases page](https://github.com/scottvail/go-xcomsave/releases/latest):
+`xcom-tools_<version>_<os>_<arch>.zip`, for Linux (amd64, arm64), Windows
+(amd64) and macOS (a signed, notarized universal build for Intel and Apple
+Silicon). Or install them with Go:
 
 ```sh
 go install github.com/scottvail/go-xcomsave/cmd/xcom2json@latest
@@ -95,6 +99,18 @@ local copy:
 ```sh
 go work init . ../go-xcomsave
 ```
+
+### Releasing
+
+Pushing a `v*` tag (`git tag v1.0.1 && git push origin v1.0.1`) runs
+[.github/workflows/release.yml](.github/workflows/release.yml), which builds the
+release archives and publishes them as a GitHub Release. The macOS binaries are
+signed and notarized when the repository has these secrets: `MACOS_CERT_P12`
+(the Developer ID Application certificate and key, exported as `.p12` and
+base64 encoded), `MACOS_CERT_PASSWORD`, and an App Store Connect API key as
+`NOTARY_KEY_P8`, `NOTARY_KEY_ID` and `NOTARY_ISSUER_ID`. Without them the
+release is still built, unsigned. To release an existing tag, run the workflow
+by hand from the Actions tab and enter the tag.
 
 ## Test data
 

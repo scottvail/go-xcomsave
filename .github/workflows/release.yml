@@ -1,0 +1,129 @@
+# Builds the xcom2json / json2xcom release archives and publishes them as a
+# GitHub Release when a v* tag is pushed. Run it by hand (Actions > release >
+# Run workflow) with an existing tag to build or rebuild that tag's release.
+#
+# The macOS archive holds universal (Intel + Apple Silicon) binaries, signed
+# with Developer ID and notarized when these repository secrets are set (see
+# .github/scripts/macos-codesign.sh): MACOS_CERT_P12, MACOS_CERT_PASSWORD,
+# NOTARY_KEY_P8, NOTARY_KEY_ID, NOTARY_ISSUER_ID.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to release, e.g. v1.0.0
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  TOOLS: xcom2json json2xcom
+
+jobs:
+  # The tools are pure Go, so one Linux runner cross-compiles Linux and Windows.
+  linux-windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - name: Build archives
+        run: |
+          ver=${TAG#v}
+          for target in linux/amd64 linux/arm64 windows/amd64; do
+            os=${target%/*} arch=${target#*/} ext=
+            [ "$os" = windows ] && ext=.exe
+            name=xcom-tools_${ver}_${os}_${arch}
+            mkdir -p "dist/$name"
+            for t in $TOOLS; do
+              CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "-s -w" \
+                -o "dist/$name/$t$ext" "./cmd/$t"
+            done
+            cp LICENSE README.md "dist/$name/"
+            (cd dist && zip -qr "$name.zip" "$name")
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tools-linux-windows
+          path: dist/*.zip
+
+  macos:
+    runs-on: macos-latest
+    env:
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+      NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+      NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      # The signing script comes from the workflow's own commit, so tags made
+      # before it existed (e.g. v1.0.0) can still be released by hand.
+      - uses: actions/checkout@v4
+        with:
+          path: ci
+          sparse-checkout: .github/scripts
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build universal binaries
+        run: |
+          name=xcom-tools_${TAG#v}_macos_universal
+          echo "NAME=$name" >>"$GITHUB_ENV"
+          mkdir -p "dist/$name" build
+          for t in $TOOLS; do
+            for arch in amd64 arm64; do
+              CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath -ldflags "-s -w" \
+                -o "build/$t-$arch" "./cmd/$t"
+            done
+            lipo -create -output "dist/$name/$t" "build/$t-amd64" "build/$t-arm64"
+          done
+          cp LICENSE README.md "dist/$name/"
+      - name: Sign
+        run: |
+          ci/.github/scripts/macos-codesign.sh setup
+          for t in $TOOLS; do
+            ci/.github/scripts/macos-codesign.sh sign --options runtime "dist/$NAME/$t"
+          done
+          for t in $TOOLS; do codesign --verify --strict --verbose=2 "dist/$NAME/$t"; done
+      - name: Archive and notarize
+        run: |
+          ditto -c -k --keepParent "dist/$NAME" "dist/$NAME.zip"
+          ci/.github/scripts/macos-codesign.sh notarize "dist/$NAME.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tools-macos
+          path: dist/*.zip
+
+  release:
+    needs: [linux-windows, macos]
+    if: startsWith(inputs.tag || github.ref_name, 'v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          sha256sum *.zip >SHA256SUMS.txt
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber *
+          else
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes *
+          fi
